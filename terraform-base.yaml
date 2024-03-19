@@ -1,0 +1,68 @@
+Parameters:
+  TerraformStateBucketName:
+    Type: String
+    Description: Enter a name for the state bucket(CF would append region and account-id at the end)
+    Default: 'terraform-state-bucket'
+  TerraformStateLockTableName:
+    Type: String
+    Description: Enter a name for the state lock DynamoDB(CF would append region and account-id at the end)
+    Default: 'terraform-state-bucket-lock'
+
+Resources:
+  # Creating a role for Code Build to plan and apply the terraform
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for Code Build to plan/apply TF code
+      RoleName: 'code-build-tf-role'
+      MaxSessionDuration: 43200
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+
+  # Creating an S3 bucket to store state file
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join
+        - '-'
+        - - !Ref TerraformStateBucketName
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+
+  # Creating DynamoDB bucket for state lock
+  TerraformStateLockTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Join
+        - '-'
+        - - !Ref TerraformStateLockTableName
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+      AttributeDefinitions:
+        - AttributeName: LockID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: LockID
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: True
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
