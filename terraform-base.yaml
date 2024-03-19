@@ -7,6 +7,10 @@ Parameters:
     Type: String
     Description: Enter a name for the state lock DynamoDB(CF would append region and account-id at the end)
     Default: 'terraform-state-bucket-lock'
+  TerraformCodeCommitName:
+    Type: String
+    Description: Enter a name for the CodeCommit repo for TF codes
+    Default: 'terraform-repository'
 
 Resources:
   # Creating a role for Code Build to plan and apply the terraform
@@ -63,6 +67,16 @@ Resources:
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
       DeletionProtectionEnabled: True
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+
+  # Creating a CodeCommit repository to store TF codes
+  TerraformCodeCommit:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: !Ref TerraformCodeCommitName
+      RepositoryDescription: CodeCommit repository for TerraForm codes
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
