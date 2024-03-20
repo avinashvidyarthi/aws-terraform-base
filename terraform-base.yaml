@@ -119,11 +119,19 @@ Resources:
       Source:
         Type: CODEPIPELINE
         BuildSpec: |
-          version: 0.2
+          version: 0.1
           phases:
+            install:
+              commands: 
+                - wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+                - echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+                - sudo apt update && sudo apt install terraform
+            pre_build:
+              commands:
+                - terraform init
             build:
               commands:
-                - echo "Hello, this is a simple echo in a buildspec file."
+                - terraform plan
       TimeoutInMinutes: 90
       Visibility: PRIVATE
       LogsConfig:
@@ -154,11 +162,19 @@ Resources:
       Source:
         Type: CODEPIPELINE
         BuildSpec: |
-          version: 0.2
+          version: 0.1
           phases:
+            install:
+              commands: 
+                - wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+                - echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+                - sudo apt update && sudo apt install terraform
+            pre_build:
+              commands:
+                - terraform init
             build:
               commands:
-                - echo "Hello, this is a simple echo in a buildspec file."
+                - terraform apply -auto-approve
       TimeoutInMinutes: 90
       Visibility: PRIVATE
       LogsConfig:
@@ -237,6 +253,10 @@ Resources:
                   - 's3:*'
                 Resource:
                   - !GetAtt TerraformPipelineArtifactBucket.Arn
+                  - !Join
+                    - ''
+                    - - !GetAtt TerraformPipelineArtifactBucket.Arn
+                      - '/*'
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
@@ -264,7 +284,7 @@ Resources:
               Name: Terraform-Source
               Configuration:
                 RepositoryName: !GetAtt TerraformCodeCommit.Name
-                BranchName: Main
+                BranchName: main
                 PollForSourceChanges: True
                 OutputArtifactFormat: CODE_ZIP
               OutputArtifacts:
@@ -301,7 +321,6 @@ Resources:
                 ProjectName: !Ref TerraformCodeBuildApply
               InputArtifacts:
                 - Name: terraform-code
-
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
