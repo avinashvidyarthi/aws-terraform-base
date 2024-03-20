@@ -11,6 +11,10 @@ Parameters:
     Type: String
     Description: Enter a name for the CodeCommit repo for TF codes
     Default: 'terraform-repository'
+  TerraformCodeBuildImage:
+    Type: String
+    Description: Image for CodeBuild projects
+    Default: 'aws/codebuild/standard:7.0'
 
 Resources:
   # Creating a role for Code Build to plan and apply the terraform
@@ -34,6 +38,8 @@ Resources:
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
+        - Key: Name
+          Value: 'code-build-tf-role'
 
   # Creating an S3 bucket to store state file
   TerraformStateBucket:
@@ -49,6 +55,12 @@ Resources:
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref TerraformStateBucketName
+              - !Ref AWS::Region
+              - !Ref AWS::AccountId
 
   # Creating DynamoDB bucket for state lock
   TerraformStateLockTable:
@@ -70,6 +82,12 @@ Resources:
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - !Ref TerraformStateLockTableName
+              - !Ref AWS::Region
+              - !Ref AWS::AccountId
 
   # Creating a CodeCommit repository to store TF codes
   TerraformCodeCommit:
@@ -80,3 +98,212 @@ Resources:
       Tags:
         - Key: Creation_Method
           Value: CloudFormation
+        - Key: Name
+          Value: !Ref TerraformCodeCommitName
+
+  # Creating code build project to plan the TF code
+  TerraformCodeBuildPlan:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: CodeBuild Project for TF pipeline - PLAN
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !Ref TerraformCodeBuildImage
+        ImagePullCredentialsType: CODEBUILD
+        Type: LINUX_CONTAINER
+      Name: 'terraform-pipeline-plan-build'
+      QueuedTimeoutInMinutes: 60
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - echo "Hello, this is a simple echo in a buildspec file."
+      TimeoutInMinutes: 90
+      Visibility: PRIVATE
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: 'terraform-pipeline-plan-build'
+          Status: ENABLED
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+        - Key: Name
+          Value: 'terraform-pipeline-plan-build'
+
+  # Creating code build project to plan the TF code
+  TerraformCodeBuildApply:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: CodeBuild Project for TF pipeline - APPLY
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: !Ref TerraformCodeBuildImage
+        ImagePullCredentialsType: CODEBUILD
+        Type: LINUX_CONTAINER
+      Name: 'terraform-pipeline-apply-build'
+      QueuedTimeoutInMinutes: 60
+      ServiceRole: !Ref CodeBuildRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - echo "Hello, this is a simple echo in a buildspec file."
+      TimeoutInMinutes: 90
+      Visibility: PRIVATE
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: 'terraform-pipeline-apply-build'
+          Status: ENABLED
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+        - Key: Name
+          Value: 'terraform-pipeline-apply-build'
+
+  # ----------------- Start Creating Pipeline resources -------------------
+
+  # Creating a bucket to store artifacts
+  TerraformPipelineArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join
+        - '-'
+        - - 'terraform-pipeline-artifact-bucket'
+          - !Ref AWS::Region
+          - !Ref AWS::AccountId
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+        - Key: Name
+          Value: !Join
+            - '-'
+            - - 'terraform-pipeline-artifact-bucket'
+              - !Ref AWS::Region
+              - !Ref AWS::AccountId
+
+  # Creating role for CodePipeline
+  TerraformPipelineIAMPolicy:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for Code Pipeline
+      RoleName: 'code-pipeline-tf-role'
+      MaxSessionDuration: 43200
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+      Policies:
+        - PolicyName: 'code-pipeline-tf-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: 'CloudWatchPermission'
+                Effect: Allow
+                Action:
+                  - 'cloudwatch:*'
+                Resource: '*'
+              - Sid: 'CodeBuildPermission'
+                Effect: Allow
+                Action:
+                  - 'codebuild:*'
+                Resource:
+                  - !GetAtt TerraformCodeBuildPlan.Arn
+                  - !GetAtt TerraformCodeBuildApply.Arn
+              - Sid: 'CodeCommitPermission'
+                Effect: Allow
+                Action:
+                  - 'codecommit:*'
+                Resource:
+                  - !GetAtt TerraformCodeCommit.Arn
+              - Sid: 'S3Permission'
+                Effect: Allow
+                Action:
+                  - 's3:*'
+                Resource:
+                  - !GetAtt TerraformPipelineArtifactBucket.Arn
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+        - Key: Name
+          Value: 'code-pipeline-tf-role'
+
+  # Creating CodePipeline for TF
+  TerraformPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref TerraformPipelineArtifactBucket
+        Type: S3
+      Name: 'terraform-pipeline'
+      PipelineType: V1
+      RoleArn: !GetAtt TerraformPipelineIAMPolicy.Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - ActionTypeId:
+                Category: Source
+                Provider: CodeCommit
+                Version: 1
+                Owner: AWS
+              Name: Terraform-Source
+              Configuration:
+                RepositoryName: !GetAtt TerraformCodeCommit.Name
+                BranchName: Main
+                PollForSourceChanges: True
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: terraform-code
+        - Name: Plan
+          Actions:
+            - ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Version: 1
+                Owner: AWS
+              Name: Terraform-Plan
+              Configuration:
+                ProjectName: !Ref TerraformCodeBuildPlan
+              InputArtifacts:
+                - Name: terraform-code
+        - Name: Approval
+          Actions:
+            - ActionTypeId:
+                Category: Approval
+                Provider: Manual
+                Version: 1
+                Owner: AWS
+              Name: Terraform-Approval
+        - Name: Apply
+          Actions:
+            - ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Version: 1
+                Owner: AWS
+              Name: Terraform-Apply
+              Configuration:
+                ProjectName: !Ref TerraformCodeBuildApply
+              InputArtifacts:
+                - Name: terraform-code
+
+      Tags:
+        - Key: Creation_Method
+          Value: CloudFormation
+        - Key: Name
+          Value: 'terraform-pipeline'
